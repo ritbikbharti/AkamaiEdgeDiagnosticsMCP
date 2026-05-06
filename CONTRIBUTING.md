@@ -4,6 +4,10 @@ Thanks for considering a contribution. This is an unofficial, community-maintain
 MCP server (see the disclaimer in [README.md](README.md)) — anyone is welcome
 to file issues or open PRs.
 
+📖 **End-user docs:** <https://bit.ly/AkamaiEdgeDiagnosticsMCPDocs> — read these
+first if you're new; they cover the LLM-facing behavior and the configuration
+surface in more depth than this contributor guide.
+
 ## Quick start
 
 ```bash

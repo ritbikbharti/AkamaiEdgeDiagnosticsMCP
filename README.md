@@ -3,10 +3,13 @@
 [![tests](https://github.com/ritbikbharti/AkamaiEdgeDiagnosticsMCP/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/ritbikbharti/AkamaiEdgeDiagnosticsMCP/actions/workflows/test.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Docs](https://img.shields.io/badge/docs-online-2ea44f)](https://bit.ly/AkamaiEdgeDiagnosticsMCPDocs)
 
 A [Model Context Protocol](https://modelcontextprotocol.io) server that exposes the
 [Akamai Edge Diagnostics API v1](https://techdocs.akamai.com/edge-diagnostics/reference/edge-diagnostics-api-1)
 as tools an LLM client (Claude Desktop, OpenAI Codex CLI, Cursor, Windsurf, etc.) can call.
+
+📖 **Full documentation:** <https://bit.ly/AkamaiEdgeDiagnosticsMCPDocs>
 
 > **Disclaimer.** This is an **unofficial, community-maintained** project.
 > It is not produced, endorsed, supported, or affiliated with Akamai
