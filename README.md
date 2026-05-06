@@ -427,6 +427,70 @@ This is an unofficial community project (see top-of-file disclaimer).
 For suspected vulnerabilities, please open a private security advisory
 on the project's source repository rather than a public issue.
 
+### Data handling: what the MCP does, what it can't do
+
+This subsection exists to set correct expectations, because the question
+*"is the data my LLM fetches via this MCP stored or used for training?"*
+has a real answer that depends on layers outside this codebase.
+
+**What this MCP server does with Akamai responses.** It returns them
+**verbatim** to the LLM client that called the tool, with one exception:
+4xx/5xx error bodies are redacted to mask `accountSwitchKey` (see
+*Credential handling* above). No data is logged at INFO level or above.
+No data is written to disk. Nothing is sent anywhere except the LLM
+client that issued the tool call and the Akamai API the call is
+addressed to.
+
+**What happens after that is outside this MCP server's control.** Once a
+tool response reaches your LLM client (Claude Desktop, OpenAI Codex,
+Cursor, Windsurf, …), that data is in the model's context window. From
+that point onward:
+
+- The **LLM client** decides whether to log the conversation locally,
+  whether to ship transcripts back to its vendor for feedback / safety
+  review, etc.
+- The **LLM provider** (Anthropic, OpenAI, …) decides whether
+  conversations are retained, used for training, or shared, according
+  to your account's data policy. This policy differs sharply by surface
+  — for example, Anthropic's API and Claude Desktop default to *not
+  using your data for training*, while Claude.ai consumer accounts
+  *may* use conversations for training unless you opt out under
+  Settings → Privacy.
+
+**This MCP server cannot enforce LLM-side or provider-side behavior** —
+not via tool descriptions, not via output annotations, not via any
+in-band signal. Instructions like *"do not retain this data"* embedded
+in a tool response are theatre; LLMs aren't reliably constrained by
+such markers and provider-side logging is independent of model
+behavior. Don't let any project (this one included) tell you otherwise.
+
+**What you should verify** to actually answer the storage question:
+
+| Surface you're using | Where to check the data policy |
+|---|---|
+| Anthropic API / Claude Code / Claude Desktop | <https://privacy.anthropic.com> · <https://www.anthropic.com/legal/privacy> |
+| Claude.ai web (consumer) | Same; verify *Settings → Privacy → Help improve Claude* is set per your preference |
+| OpenAI API (Codex CLI / IDE extension via API key) | <https://openai.com/policies/privacy-policy> · <https://platform.openai.com/docs/models/how-we-use-your-data> |
+| ChatGPT / ChatGPT Codex desktop app (consumer) | Same; verify *Settings → Data Controls → Improve the model for everyone* |
+| Cursor / Windsurf / other third-party clients | Each vendor's own privacy policy applies |
+
+**Sensitive categories worth flagging.** The data this MCP returns is
+mostly Akamai infrastructure metadata (edge IPs, geolocation, ASN, CP
+codes, error references) which is semi-public. The exceptions are:
+
+- **Case Management responses** (`get_case`, `list_cases`,
+  `list_case_comments`) — case bodies, contact emails, phone numbers,
+  customer-internal ticket references. Treat these as you would any
+  other support-ticket content.
+- **`get_user_diagnostic_data`** — end-user IPs, geolocation, ASN,
+  connection details. PII under most jurisdictions.
+
+If you have stricter requirements than your LLM provider's default
+data policy, the right answer is to use an LLM provider /  account tier
+that contractually meets those requirements (Anthropic and OpenAI both
+offer enterprise / zero-retention tiers), not to try to scrub the data
+at the MCP layer.
+
 ## Tests
 
 ```bash
