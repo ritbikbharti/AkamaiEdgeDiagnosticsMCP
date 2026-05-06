@@ -110,11 +110,13 @@ async def test_translate_error_string_passes_trace_forward_logs(make_client):
 
 async def test_grep_requires_edge_ip_and_cp_code_via_pydantic(make_client):
     """Akamai requires both — Pydantic validates this before we hit the API."""
+    from pydantic import ValidationError
+
     client = make_client(lambda r: httpx.Response(200, json={}))
     try:
-        with pytest.raises(Exception):  # pydantic.ValidationError
+        with pytest.raises(ValidationError):
             await logs.get_grep_logs(client, M.GrepLogsInput())
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             await logs.get_grep_logs(client, M.GrepLogsInput(edge_ip="1.2.3.4"))
     finally:
         await client.aclose()

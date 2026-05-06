@@ -87,7 +87,10 @@ class MtrInput(_Base):
     )
     packet_type: PacketType = Field(
         "ICMP",
-        description="Probe protocol. ICMP is more universal; TCP works through firewalls that drop ICMP.",
+        description=(
+            "Probe protocol. ICMP is more universal; TCP works through "
+            "firewalls that drop ICMP."
+        ),
     )
     port: int | None = Field(
         None,
@@ -287,8 +290,9 @@ class TranslatedUrlInput(_Base):
     url: HttpUrl = Field(
         ...,
         description=(
-            "An Akamai staging or production ARL/URL (e.g. https://aXX.akamai.net/...) to translate "
-            "into its origin and routing details."
+            "An Akamai staging or production ARL/URL (e.g. "
+            "https://aXX.akamai.net/...) to translate into its origin "
+            "and routing details."
         ),
     )
 

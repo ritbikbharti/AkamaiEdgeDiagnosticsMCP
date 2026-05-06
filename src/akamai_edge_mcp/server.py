@@ -56,7 +56,7 @@ ToolFn = Callable[[AkamaiEdgeDiagnosticsClient, BaseModel], Awaitable[dict[str, 
 def _make_handler(
     name: str,
     model: type[BaseModel],
-    impl: "ToolFn",
+    impl: ToolFn,
     client: AkamaiEdgeDiagnosticsClient,
 ):
     """Build an async handler whose signature mirrors the Pydantic model fields.
@@ -133,7 +133,11 @@ def _register_tools(mcp: FastMCP, client: AkamaiEdgeDiagnosticsClient) -> None:
     register("run_mtr", M.MtrInput, diagnostics.run_mtr)
     register("run_curl", M.CurlInput, diagnostics.run_curl)
 
-    register("translate_error_string", M.TranslateErrorStringInput, translate.translate_error_string)
+    register(
+        "translate_error_string",
+        M.TranslateErrorStringInput,
+        translate.translate_error_string,
+    )
     register("launch_translated_url", M.TranslatedUrlInput, translate.launch_translated_url)
 
     register("get_grep_logs", M.GrepLogsInput, logs.get_grep_logs)

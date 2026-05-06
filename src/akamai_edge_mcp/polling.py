@@ -144,7 +144,6 @@ async def poll_until_complete(
     start = time.monotonic()
     interval = INITIAL_INTERVAL_SECONDS
     last_status: str | None = None
-    last_payload: Any = initial_response
     poll_count = 0
 
     while True:
@@ -164,7 +163,6 @@ async def poll_until_complete(
                 continue
             raise
 
-        last_payload = payload
         last_status = _extract_status(payload)
         logger.debug(
             "Poll %d for %s: http=%d status=%s elapsed=%.2fs",

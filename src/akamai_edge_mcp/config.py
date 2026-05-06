@@ -58,8 +58,8 @@ def load_credentials(
     if not path.is_file():
         raise ConfigError(
             f"EdgeGrid credentials file not found at {path}. "
-            "Create one (see https://techdocs.akamai.com/developer/docs/set-up-authentication-credentials) "
-            "or set EDGERC_PATH to point at it."
+            "Create one (see Akamai's 'Set up authentication credentials' "
+            "guide at techdocs.akamai.com) or set EDGERC_PATH to point at it."
         )
 
     parser = configparser.ConfigParser()

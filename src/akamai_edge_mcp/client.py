@@ -106,7 +106,7 @@ class AkamaiEdgeDiagnosticsClient:
             headers={"Accept": "application/json"},
         )
 
-    async def __aenter__(self) -> "AkamaiEdgeDiagnosticsClient":
+    async def __aenter__(self) -> AkamaiEdgeDiagnosticsClient:
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
