@@ -8,6 +8,48 @@ import pytest
 from akamai_edge_mcp.client import AkamaiAPIError
 
 
+async def test_full_path_routes_bare_to_edge_diagnostics(make_client):
+    """Bare path → /edge-diagnostics/v1/<path> (back-compat for existing tools)."""
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        return httpx.Response(200, json={})
+
+    client = make_client(handler)
+    try:
+        await client.get("/dig")
+    finally:
+        await client.aclose()
+    assert seen["path"] == "/edge-diagnostics/v1/dig"
+
+
+async def test_full_path_passes_already_prefixed_paths_through(make_client):
+    """Already-prefixed Akamai API paths (case-mgmt, papi, etc.) route as-is."""
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        return httpx.Response(200, json={})
+
+    client = make_client(handler)
+    try:
+        await client.get("/case-management/v3/cases")
+        await client.get("/papi/v1/properties")
+        await client.get("/edge-diagnostics/v1/edge-locations")
+    finally:
+        await client.aclose()
+
+    assert seen[0] == "/case-management/v3/cases"
+    assert seen[1] == "/papi/v1/properties"
+    assert seen[2] == "/edge-diagnostics/v1/edge-locations"
+    # Critical: case-management path was NOT mangled to
+    # /edge-diagnostics/v1/case-management/v3/cases
+    for p in seen:
+        assert not p.startswith("/edge-diagnostics/v1/case-management")
+        assert not p.startswith("/edge-diagnostics/v1/papi")
+
+
 async def test_get_returns_parsed_json(make_client):
     seen = {}
 

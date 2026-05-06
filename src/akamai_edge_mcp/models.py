@@ -324,6 +324,177 @@ class GetUserDiagnosticDataInput(_Base):
     )
 
 
+# ---------- case management ----------
+
+CaseListType = Literal[
+    "MY_ACTIVE_CASES", "MY_CLOSED_CASES", "ALL_ACTIVE_CASES", "ALL_CLOSED_CASES"
+]
+CaseCategoryId = Literal[
+    "SECURITY",
+    "MANAGED_CLOUD",
+    "BUSINESS_SUPPORT",
+    "PROFESSIONAL_SERVICES",
+    "BILLING",
+    "TECHNICAL",
+]
+
+
+class AlternateContact(_Base):
+    name: str | None = Field(None, description="Full name of the alternate contact.")
+    email: str | None = Field(None, description="Email address.")
+    phone: str | None = Field(None, description="Phone number.")
+    company: str | None = Field(None, description="Company the contact works for.")
+
+
+class ListAccountCategoriesInput(_Base):
+    pass
+
+
+class GetCaseCategoryInput(_Base):
+    category_id: CaseCategoryId = Field(
+        ...,
+        description=(
+            "Case category to fetch the schema for. Call this BEFORE create_case "
+            "to discover the per-category required fields (severity values, "
+            "valid productName / serviceName / problemName combinations, etc.)."
+        ),
+    )
+
+
+class ListCasesInput(_Base):
+    type: CaseListType = Field(
+        ...,
+        description=(
+            "Which cases to list. MY_* = cases you opened; ALL_* = all cases on "
+            "the account. ACTIVE = open; CLOSED = resolved."
+        ),
+    )
+    duration: int | None = Field(
+        None,
+        description=(
+            "Look-back window in days (omit to use the API default). Useful with "
+            "*_CLOSED_CASES to limit history."
+        ),
+    )
+    account_ids: str | None = Field(
+        None,
+        description="Comma-separated account IDs to filter by. Omit for all accessible accounts.",
+    )
+    limit: int | None = Field(
+        None, ge=1, description="Max cases to return per page."
+    )
+    cursor: str | None = Field(
+        None, description="Pagination cursor from a previous response."
+    )
+
+
+class CreateCaseInput(_Base):
+    subject: str = Field(
+        ...,
+        max_length=255,
+        description="Title of the case (≤255 chars). Make it short and specific.",
+    )
+    description: str = Field(..., description="Detailed description of the issue.")
+    account_id: str = Field(
+        ...,
+        description="Account to create the case under. Get from list_account_categories.",
+    )
+    category_id: CaseCategoryId = Field(
+        ...,
+        description=(
+            "Top-level category. Use TECHNICAL for most edge / configuration / "
+            "performance issues; SECURITY for WAF / bot / DDoS; BILLING for "
+            "invoicing; MANAGED_CLOUD for cloud-services; PROFESSIONAL_SERVICES "
+            "for engagement-related; BUSINESS_SUPPORT for everything else."
+        ),
+    )
+    severity: str | None = Field(
+        None,
+        description=(
+            "Severity level. Valid values come from get_case_category for the "
+            "chosen category_id — call that first if unsure."
+        ),
+    )
+    product_name: str | None = Field(
+        None,
+        description="Product the case is about. Valid values come from get_case_category.",
+    )
+    service_name: str | None = Field(
+        None,
+        description="Service the case is about. Valid values come from get_case_category.",
+    )
+    problem_name: str | None = Field(
+        None,
+        description="Problem name. Valid values come from get_case_category.",
+    )
+    area_name: str | None = Field(
+        None,
+        description="Area name. Required for some categories (see get_case_category).",
+    )
+    policy_domain_name: str | None = Field(
+        None,
+        description="Policy domain. Required for some categories (see get_case_category).",
+    )
+    product_solution_name: str | None = Field(
+        None,
+        description="Product solution name. Required for some categories.",
+    )
+    ps_package_name: str | None = Field(
+        None,
+        description="Professional services package name. Required for PROFESSIONAL_SERVICES.",
+    )
+    also_notify: list[str] | None = Field(
+        None, description="Additional email addresses to send case notifications to."
+    )
+    alternate_contact: AlternateContact | None = Field(
+        None,
+        description="Alternate person for the support team to contact (name/email/phone/company).",
+    )
+    customer_tracking_number: str | None = Field(
+        None, description="Your internal ticket / tracking number for cross-reference."
+    )
+    partner_ticket_number: str | None = Field(
+        None,
+        max_length=30,
+        description="Reseller's support ticket number (≤30 chars), if applicable.",
+    )
+    parent_account_id: str | None = Field(
+        None,
+        description="Parent account to associate the case with, if relevant.",
+    )
+
+
+class GetCaseInput(_Base):
+    case_id: str = Field(..., description="The case ID to fetch.")
+
+
+class UpdateCaseInput(_Base):
+    case_id: str = Field(..., description="The case ID to update.")
+    also_notify: list[str] | None = Field(
+        None, description="Updated list of email addresses for case notifications."
+    )
+    alternate_contact: AlternateContact | None = Field(
+        None, description="Updated alternate contact details."
+    )
+
+
+class ListCaseCommentsInput(_Base):
+    case_id: str = Field(..., description="The case ID to list comments for.")
+
+
+class AddCaseCommentInput(_Base):
+    case_id: str = Field(..., description="The case ID to comment on.")
+    comment: str = Field(..., description="Comment text to add.")
+
+
+class RequestCaseClosureInput(_Base):
+    case_id: str = Field(..., description="The case ID to request closure for.")
+    comment: str | None = Field(
+        None,
+        description="Optional context for closing (e.g. resolution summary).",
+    )
+
+
 # ---------- metadata tracer (MDT) ----------
 
 

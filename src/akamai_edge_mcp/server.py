@@ -19,7 +19,7 @@ from . import models as M
 from .client import AkamaiAPIError, AkamaiEdgeDiagnosticsClient
 from .config import ConfigError, load_credentials
 from .polling import PollingTimeoutError
-from .tools import diagnostics, locations, logs, mdt, problems, translate
+from .tools import cases, diagnostics, locations, logs, mdt, problems, translate
 
 logger = logging.getLogger("akamai_edge_mcp")
 
@@ -172,6 +172,25 @@ def _register_tools(mcp: FastMCP, client: AkamaiEdgeDiagnosticsClient) -> None:
 
     register("run_metadata_trace", M.MetadataTraceInput, mdt.run_metadata_trace)
     register("list_mdt_locations", M.ListMdtLocationsInput, mdt.list_mdt_locations)
+
+    # ----- Case Management -----
+    register(
+        "list_account_categories",
+        M.ListAccountCategoriesInput,
+        cases.list_account_categories,
+    )
+    register("get_case_category", M.GetCaseCategoryInput, cases.get_case_category)
+    register("list_cases", M.ListCasesInput, cases.list_cases)
+    register("get_case", M.GetCaseInput, cases.get_case)
+    register("create_case", M.CreateCaseInput, cases.create_case)
+    register("update_case", M.UpdateCaseInput, cases.update_case)
+    register("list_case_comments", M.ListCaseCommentsInput, cases.list_case_comments)
+    register("add_case_comment", M.AddCaseCommentInput, cases.add_case_comment)
+    register(
+        "request_case_closure",
+        M.RequestCaseClosureInput,
+        cases.request_case_closure,
+    )
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:

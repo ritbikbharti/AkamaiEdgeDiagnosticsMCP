@@ -1,8 +1,20 @@
-"""Async HTTP client for the Akamai Edge Diagnostics API with EdgeGrid signing."""
+"""Async HTTP client for Akamai APIs with EdgeGrid signing.
+
+Originally Edge-Diagnostics-only; now hosts multiple Akamai API surfaces
+(Edge Diagnostics, Case Management, ...). Tools pass paths in one of two
+forms:
+
+  - **Bare path** (e.g. ``"/dig"``): prepended with the default API
+    prefix (``/edge-diagnostics/v1``) for backward compatibility.
+  - **Already-prefixed path** (e.g. ``"/case-management/v3/cases"``):
+    used as-is. Detected by the regex ``^/[a-z][a-z0-9-]*/v\\d+(/|$)``
+    which matches every Akamai API URL convention.
+"""
 
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -10,6 +22,10 @@ import requests
 from akamai.edgegrid import EdgeGridAuth as RequestsEdgeGridAuth
 
 from .config import EdgeGridCredentials
+
+# Matches paths like /edge-diagnostics/v1/..., /case-management/v3/...,
+# /papi/v1/..., etc. — the universal Akamai URL shape.
+_ABSOLUTE_API_PATH = re.compile(r"^/[a-z][a-z0-9-]*/v\d+(/|$)")
 
 logger = logging.getLogger(__name__)
 
@@ -117,10 +133,12 @@ class AkamaiEdgeDiagnosticsClient:
             await self._client.aclose()
 
     def _full_path(self, path: str) -> str:
-        if path.startswith(self.API_PREFIX):
-            return path
         if not path.startswith("/"):
             path = "/" + path
+        # Already-prefixed Akamai API path (any API, any version) → use as-is
+        if _ABSOLUTE_API_PATH.match(path):
+            return path
+        # Bare path → prepend the default Edge Diagnostics prefix
         return f"{self.API_PREFIX}{path}"
 
     async def request(

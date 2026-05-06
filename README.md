@@ -37,6 +37,27 @@ as tools an LLM client (Claude Desktop, OpenAI Codex CLI, Cursor, Windsurf, etc.
 | `list_mdt_locations` | Enumerate edge locations available specifically for MDT. |
 | `create_user_diagnostic_link` / `list_user_diagnostic_groups` / `get_user_diagnostic_data` | End-user diagnostic data collection workflow. |
 
+### Case Management (since v0.2.0)
+
+For the diagnose→file workflow — once an LLM has identified a problem
+with the diagnostic tools above, it can open and manage support cases
+without leaving the conversation:
+
+| Tool | What it does |
+|---|---|
+| `list_account_categories` | Discover which accounts you can open cases for, and the categories each supports. Call FIRST. |
+| `get_case_category` | Get the per-category schema (severity values, required fields like productName / serviceName / problemName). Call BEFORE `create_case`. |
+| `list_cases` | List cases by `MY_ACTIVE_CASES` / `MY_CLOSED_CASES` / `ALL_ACTIVE_CASES` / `ALL_CLOSED_CASES`. |
+| `get_case` | Fetch a single case by ID. |
+| `create_case` | Open a new support case. |
+| `update_case` | Update notification list / alternate contact (subject and category are immutable post-create). |
+| `list_case_comments` / `add_case_comment` | Read or append to the case discussion thread. |
+| `request_case_closure` | Request closure with an optional resolution comment. |
+
+*File attachments (`POST /cases/{id}/attachments` and friends) are not
+yet exposed — multipart upload + status polling is meaningful work that
+will land in a later release.*
+
 Plus first-class support for **Akamai account-switch keys**, so partners and
 managed-service providers can run diagnostics against any account they have
 delegated access to.
@@ -44,8 +65,14 @@ delegated access to.
 ## Prerequisites
 
 - Python 3.10+
-- An Akamai API client whose authorization grants the **Edge Diagnostics**
-  API (`/edge-diagnostics/v1/*`) at READ-WRITE. Create one in
+- An Akamai API client whose authorization grants:
+  - **Edge Diagnostics** API (`/edge-diagnostics/v1/*`) at READ-WRITE
+    — required for everything except the case-management tools.
+  - **Case Management** API (`/case-management/v3/*`) at READ-WRITE
+    — required only if you want to use `create_case` /  `list_cases` /
+    `add_case_comment` etc. Skip this grant if you only need diagnostics.
+
+  Create or edit your client in
   [Akamai Control Center → Identity & Access](https://control.akamai.com/apps/identity-management).
 - For account switching: that same API client must have **delegated access**
   to the target account.
@@ -450,6 +477,11 @@ and exits cleanly when stdin closes. Anything else is a real error.
 - Endpoints under `/gtm/*` (GTM properties), `/ipa/hostnames` (IP
   Acceleration), and `/esi-debugger-api/v1/debug` (ESI Debugger) are not
   yet exposed. Open an issue or PR if you need them.
+- Case Management file attachment endpoints
+  (`POST /cases/{id}/attachments`, `GET .../status/{uploadId}`,
+  `GET .../{attachmentId}`) are skipped in v0.2.0 — multipart upload +
+  status polling needs its own design pass. Comments
+  (`add_case_comment`) are usually sufficient for LLM-driven workflows.
 - All request/response shapes are validated against Akamai's official
   [OpenAPI spec](https://github.com/akamai/akamai-apis/blob/main/apis/edge-diagnostics/v1/openapi.json).
 - Only the synchronous `GET /grep` is wired up; the async `POST /grep`
