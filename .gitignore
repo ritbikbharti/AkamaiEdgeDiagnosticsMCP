@@ -1,0 +1,29 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.swp
+.DS_Store
+
+# Credentials — never commit
+.edgerc
+*.edgerc
+edgerc
+secrets.toml
+**/credentials*
+**/*credentials*
+
+# Editor / IDE / agent local state
+.claude/
+.cursor/
+.idea/
+.vscode/
