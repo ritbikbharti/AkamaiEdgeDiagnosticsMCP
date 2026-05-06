@@ -1,5 +1,9 @@
 # Akamai Edge Diagnostics MCP Server
 
+[![tests](https://github.com/ritbikbharti/AkamaiEdgeDiagnosticsMCP/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/ritbikbharti/AkamaiEdgeDiagnosticsMCP/actions/workflows/test.yml)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A [Model Context Protocol](https://modelcontextprotocol.io) server that exposes the
 [Akamai Edge Diagnostics API v1](https://techdocs.akamai.com/edge-diagnostics/reference/edge-diagnostics-api-1)
 as tools an LLM client (Claude Desktop, OpenAI Codex CLI, Cursor, Windsurf, etc.) can call.
@@ -52,7 +56,7 @@ The recommended layout uses a project-local virtualenv so Claude Desktop
 gets a stable, absolute path to the launcher:
 
 ```bash
-git clone <this-repo> akamai-edge-diagnostics-mcp
+git clone https://github.com/ritbikbharti/AkamaiEdgeDiagnosticsMCP.git akamai-edge-diagnostics-mcp
 cd akamai-edge-diagnostics-mcp
 
 python3 -m venv .venv
