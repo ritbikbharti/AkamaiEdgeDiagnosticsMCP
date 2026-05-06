@@ -347,15 +347,32 @@ editor window. Server stderr is surfaced inline when `LOG_LEVEL=DEBUG`.
 
 ## Example session
 
-> **You:** A user reported error reference `9.abc12345.1700000000.deadbeef`
-> on `www.example.com`. Can you decode it and pull the matching edge logs?
+> **You:** Translate Akamai error reference `9.abc12345.1700000000.deadbeef`
+> from `www.example.com`, summarize the root cause, and open a TECHNICAL
+> severity-3 case under account `ACT-XXX` with the findings as the description.
 >
 > **Claude:**
 > 1. calls `translate_error_string({error_code: "9.abc12345.1700000000.deadbeef"})`
->    → returns the decoded edge server, timestamp, and inline log snippet
+>    → returns the decoded edge server, timestamp, and an inline log snippet
 > 2. calls `get_grep_logs({edge_ip: "...", cp_code: 12345, start: "..."})`
->    → returns matching log lines
-> 3. summarizes the root cause for you
+>    → returns matching log lines around the failure
+> 3. summarizes for you in chat: "Origin returned 502 from `origin.example.com`
+>    on edge IP `23.x.x.x` at 17:33 UTC; TCP connect succeeded but TLS
+>    handshake failed (`SSL_ERROR_SYSCALL`). Likely an origin-side cert
+>    rotation or LB drop."
+> 4. calls `get_case_category({category_id: "TECHNICAL"})`
+>    → discovers the valid severity values and which of `productName` /
+>    `serviceName` / `problemName` are required for this category
+> 5. calls `create_case({account_id: "ACT-XXX", category_id: "TECHNICAL",
+>    severity: "3-Limited Impact", subject: "502 from origin on www.example.com
+>    – TLS handshake failures", description: "<the summary above + the decoded
+>    error + the relevant grep lines>", product_name: "...", problem_name: "..."})`
+>    → returns the new `caseId`, which Claude shows you with a link
+>
+> **You (later):** Add a comment to that case with the MTR I just ran.
+>
+> **Claude:** calls `add_case_comment({case_id: "...", comment: "<your MTR
+> findings>"})` → comment posted.
 
 ## Security
 
