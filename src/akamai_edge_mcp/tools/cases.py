@@ -32,6 +32,46 @@ from ..models import (
 
 _PREFIX = "/case-management/v3"
 
+# Field names whose values are PII or otherwise sensitive enough that the
+# 'summary' response format should strip them. Stripped, not redacted —
+# keeping a placeholder string would still leak the *presence* of data.
+# Drawn from Akamai's case-management response schema; conservative.
+_CASE_SENSITIVE_FIELDS: frozenset[str] = frozenset(
+    {
+        "description",
+        "alternateContact",
+        "alsoNotify",
+        "customerTrackingNumber",
+        "partnerTicketNumber",
+        "contactInformation",
+        "contact",
+        "comments",  # full comment thread when included on a case object
+    }
+)
+# Keys we keep in summary mode — everything else gets dropped from the
+# top-level case object. Allowlist is safer than denylist for "give me
+# only the metadata".
+_CASE_SUMMARY_KEYS: frozenset[str] = frozenset(
+    {
+        "caseId",
+        "id",
+        "status",
+        "severity",
+        "category",
+        "categoryId",
+        "subject",
+        "createdTime",
+        "lastUpdatedTime",
+        "createdBy",
+        "accountId",
+        "commentCount",
+    }
+)
+# Keys to keep per-comment in summary mode (drops the comment body itself).
+_COMMENT_SUMMARY_KEYS: frozenset[str] = frozenset(
+    {"commentId", "id", "createdTime", "author", "createdBy"}
+)
+
 
 def _to_camel(name: str) -> str:
     """snake_case → camelCase, used to convert Pydantic field names to
@@ -43,6 +83,58 @@ def _to_camel(name: str) -> str:
 def _serialize(model_dump: dict[str, Any]) -> dict[str, Any]:
     """Drop None values and camelCase the keys."""
     return {_to_camel(k): v for k, v in model_dump.items() if v is not None}
+
+
+def _filter_keys(obj: Any, keep: frozenset[str]) -> Any:
+    """Project a dict (or list of dicts) down to a known-safe set of keys.
+
+    Used to enforce summary-mode responses: the LLM gets enough metadata
+    to identify objects, but no case bodies / comment bodies / PII fields
+    pass through unless format='full' is set.
+    """
+    if isinstance(obj, dict):
+        return {k: v for k, v in obj.items() if k in keep}
+    if isinstance(obj, list):
+        return [_filter_keys(item, keep) for item in obj]
+    return obj
+
+
+def _summarize_case(case: dict[str, Any]) -> dict[str, Any]:
+    summary = _filter_keys(case, _CASE_SUMMARY_KEYS)
+    # Synthesize commentCount from a comments array if Akamai inlined one.
+    if isinstance(case.get("comments"), list) and "commentCount" not in summary:
+        summary["commentCount"] = len(case["comments"])
+    return summary
+
+
+def _apply_case_summary(payload: Any) -> Any:
+    """Reshape a case-mgmt response for format='summary'."""
+    if isinstance(payload, dict):
+        # Common Akamai shape: {"cases": [...], "cursor": "..."}
+        if isinstance(payload.get("cases"), list):
+            return {
+                **{k: v for k, v in payload.items() if k != "cases"},
+                "cases": [_summarize_case(c) for c in payload["cases"]],
+            }
+        # Single case object
+        return _summarize_case(payload)
+    return payload
+
+
+def _apply_comments_summary(payload: Any) -> Any:
+    """Reshape a list-comments response for format='summary'."""
+    if isinstance(payload, dict) and isinstance(payload.get("comments"), list):
+        return {
+            **{k: v for k, v in payload.items() if k != "comments"},
+            "comments": _filter_keys(payload["comments"], _COMMENT_SUMMARY_KEYS),
+            "commentCount": len(payload["comments"]),
+        }
+    if isinstance(payload, list):
+        return {
+            "comments": _filter_keys(payload, _COMMENT_SUMMARY_KEYS),
+            "commentCount": len(payload),
+        }
+    return payload
 
 
 # ---------- discovery ----------
@@ -82,7 +174,10 @@ async def list_cases(
     """List cases on the account.
 
     ``type`` is required — pick from MY_ACTIVE_CASES, MY_CLOSED_CASES,
-    ALL_ACTIVE_CASES, ALL_CLOSED_CASES. Use cursor for pagination.
+    ALL_ACTIVE_CASES, ALL_CLOSED_CASES. Use cursor for pagination. Set
+    ``format='summary'`` to strip per-case description / contact / notify
+    fields when only metadata is needed (saves context tokens, reduces
+    PII exposure to the LLM).
     """
     query: dict[str, Any] = {"type": params.type}
     if params.duration is not None:
@@ -93,14 +188,25 @@ async def list_cases(
         query["limit"] = params.limit
     if params.cursor:
         query["cursor"] = params.cursor
-    return await client.get(f"{_PREFIX}/cases", params=query)
+    response = await client.get(f"{_PREFIX}/cases", params=query)
+    if params.format == "summary":
+        return _apply_case_summary(response)
+    return response
 
 
 async def get_case(
     client: AkamaiEdgeDiagnosticsClient, params: GetCaseInput
 ) -> dict[str, Any]:
-    """Fetch a single case by ID, including its current status and metadata."""
-    return await client.get(f"{_PREFIX}/cases/{params.case_id}")
+    """Fetch a single case by ID, including its current status and metadata.
+
+    Set ``format='summary'`` to omit description, alternateContact,
+    alsoNotify, and other potentially-PII fields — useful when you just
+    need to confirm a case's status / severity / category.
+    """
+    response = await client.get(f"{_PREFIX}/cases/{params.case_id}")
+    if params.format == "summary":
+        return _apply_case_summary(response)
+    return response
 
 
 # ---------- create / update / close ----------
@@ -174,8 +280,16 @@ async def request_case_closure(
 async def list_case_comments(
     client: AkamaiEdgeDiagnosticsClient, params: ListCaseCommentsInput
 ) -> dict[str, Any]:
-    """List all comments on a case in chronological order."""
-    return await client.get(f"{_PREFIX}/cases/{params.case_id}/comments")
+    """List all comments on a case in chronological order.
+
+    Set ``format='summary'`` to get just per-comment metadata
+    (commentId, createdTime, author) without the comment bodies —
+    useful when you only need to count or check recency.
+    """
+    response = await client.get(f"{_PREFIX}/cases/{params.case_id}/comments")
+    if params.format == "summary":
+        return _apply_comments_summary(response)
+    return response
 
 
 async def add_case_comment(

@@ -427,6 +427,43 @@ This is an unofficial community project (see top-of-file disclaimer).
 For suspected vulnerabilities, please open a private security advisory
 on the project's source repository rather than a public issue.
 
+### Threat model
+
+Audited against [Akamai's MCP threat-conversation post](https://www.akamai.com/blog/security/other-side-mcp-threat-conversation)
+(May 2026). Most of the article's threats target **network-exposed** MCP
+servers; this server runs primarily over **stdio** (per-process, no
+listener) which neutralises a large class of them. Status per threat:
+
+| Threat (from the article) | stdio mode | SSE mode | Defense in this codebase |
+|---|---|---|---|
+| Version downgrade | n/a | n/a | Version negotiation handled by upstream `mcp` SDK |
+| Malformed message injection | ✅ | ✅ | Pydantic v2 with `extra="forbid"` on every model rejects unknown / mistyped fields |
+| Oversized payloads | ✅ | ✅ | Every string and list field has an explicit `max_length` cap (since v0.2.1) |
+| Tool-description info leakage | ℹ️ inherent to MCP | ℹ️ inherent to MCP | We don't leak admin-only hints; descriptions reference public Akamai docs |
+| Back-end injection (SQL/NoSQL/cmd/LDAP) | ✅ | ✅ | We don't run SQL or shell out — every "query" is a typed JSON pass-through to Akamai |
+| SSRF via remote-fetch tools | ✅ | ✅ | Our outbound requests only ever hit one host (the `.edgerc` host); URL params are data forwarded to Akamai, not used as our fetch targets |
+| Prompt injection via tool args | ✅ | ✅ | We have no internal LLM; tool args don't reach any model |
+| Technical info leaks via errors | ✅ | ✅ | Generic exception handler — no stack traces, no DB internals (we have no DB), no infra service names |
+| PII / business-data oversharing | ✅ (opt-in) | ✅ (opt-in) | `format="summary"` on `get_case` / `list_cases` / `list_case_comments` / `get_user_diagnostic_data` strips case bodies, contact info, end-user IPs, and city-level geo (since v0.2.1) |
+| Broken authn (no app-layer auth) | ✅ OS process isolation | ⚠️ **gap** | SSE binds to `127.0.0.1` by default but offers no token check; **don't expose `--host 0.0.0.0` without an auth proxy in front** |
+| Excessive tool exposure | ✅ single user | ⚠️ gap | All 28 tools available to any caller; SSE has no role gating |
+| Broken object-level authz (BOLA) | ✅ Akamai enforces | ✅ Akamai enforces | EdgeGrid credentials scope access; Akamai 403s on out-of-scope IDs |
+| Multi-tenancy via tool args | ⚠️ MSP only | ⚠️ MSP only | `account_id` is an LLM-supplied parameter on `create_case`; MSPs with broad delegation should run one server-instance per customer |
+| Malicious tool chaining | ⚠️ inherent | ⚠️ inherent | The MCP layer can't enforce session-aware composition policies; that's an MCP gateway concern |
+| Direct resource URI manipulation | ✅ | ✅ | We expose tools only — no MCP Resources or Resource Templates, so no `file://` / `fetch://` exposure |
+| Rate limiting / DoS | ✅ natural | ⚠️ gap | No per-call concurrency or rate limits in SSE mode |
+| Cost / quota exhaustion | ⚠️ partial | ⚠️ partial | 429 with `Retry-After` is now honored by the polling helper and surfaced as `retry_after_seconds` in error envelopes (since v0.2.1) so the LLM can wait instead of hammering Akamai's per-account quota |
+
+**Honest summary.** For the stdio use case (~all real deployments today),
+the practical residual risks are: (1) tool descriptions inherently reveal
+the capability surface, (2) MSP / multi-tenant deployments need to run
+one instance per tenant, (3) malicious tool chaining is an open problem
+the MCP layer can't fully solve. For the SSE use case we are materially
+under-protected — if you're considering exposing this server over the
+network, treat the README's SSE configuration as experimental until the
+v0.3.0 hardening lands (auth, per-call concurrency limits, refusal to
+bind `0.0.0.0` without explicit opt-in).
+
 ### Data handling: what the MCP does, what it can't do
 
 This subsection exists to set correct expectations, because the question

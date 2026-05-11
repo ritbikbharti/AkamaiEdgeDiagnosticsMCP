@@ -929,6 +929,56 @@ async def test_verify_and_locate_ip_uses_singular_field(make_client):
     assert "ipAddresses" not in seen["body"]
 
 
+async def test_pydantic_rejects_oversized_string_inputs(make_client):
+    """SECURITY (oversized payload DoS): every string field has an explicit
+    max_length cap. Pydantic must reject inputs that exceed it before any
+    HTTP call is made."""
+    from pydantic import ValidationError
+
+    # hostname capped at 253 (DigInput)
+    with pytest.raises(ValidationError):
+        M.DigInput(hostname="a" * 1000, query_type="A")
+
+    # ip_address capped at 45 (VerifyIpInput)
+    with pytest.raises(ValidationError):
+        M.VerifyIpInput(ip_address="x" * 100)
+
+    # case description capped at 32768 (CreateCaseInput)
+    with pytest.raises(ValidationError):
+        M.CreateCaseInput(
+            subject="ok",
+            description="x" * 100_000,
+            account_id="A",
+            category_id="TECHNICAL",
+        )
+
+    # comment text capped at 8192
+    with pytest.raises(ValidationError):
+        M.AddCaseCommentInput(case_id="X", comment="x" * 100_000)
+
+
+async def test_pydantic_rejects_oversized_list_inputs(make_client):
+    """List cardinality is also capped."""
+    from pydantic import ValidationError
+
+    # also_notify capped at 50 emails
+    with pytest.raises(ValidationError):
+        M.CreateCaseInput(
+            subject="ok",
+            description="ok",
+            account_id="A",
+            category_id="TECHNICAL",
+            also_notify=[f"u{i}@example.com" for i in range(200)],
+        )
+
+    # MDT request_headers list capped at 50
+    with pytest.raises(ValidationError):
+        M.MetadataTraceInput(
+            url="https://x.example/",
+            request_headers=[f"X-{i}: v" for i in range(200)],
+        )
+
+
 async def test_user_diagnostic_paths_use_correct_segment(make_client):
     """Spec: /user-diagnostic-data/groups, not /user-diagnostic-data-groups."""
     seen = []

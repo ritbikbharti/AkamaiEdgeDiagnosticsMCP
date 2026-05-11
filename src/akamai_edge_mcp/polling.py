@@ -161,6 +161,13 @@ async def poll_until_complete(
             if exc.status_code in (404, 425):
                 interval = min(interval * BACKOFF_FACTOR, MAX_INTERVAL_SECONDS)
                 continue
+            if exc.status_code == 429:
+                # Honor Retry-After if Akamai provided one; otherwise back off.
+                interval = max(
+                    exc.retry_after_seconds or 0,
+                    min(interval * BACKOFF_FACTOR, MAX_INTERVAL_SECONDS),
+                )
+                continue
             raise
 
         last_status = _extract_status(payload)

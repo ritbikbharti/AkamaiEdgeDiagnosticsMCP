@@ -208,6 +208,36 @@ async def test_akamai_executionStatus_in_progress_keeps_polling(make_client):
     assert result["result"]["edgeServerLogs"] == [{"line": "..."}]
 
 
+async def test_429_during_poll_is_retried_with_retry_after(make_client):
+    """SECURITY (denial-of-wallet defense): the polling helper must back off
+    on 429, honoring Akamai's Retry-After hint, not let it bubble as a fatal
+    error. Otherwise a transient rate limit aborts long-running diagnostics."""
+    responses = [
+        httpx.Response(429, json={}, headers={"Retry-After": "1"}),
+        httpx.Response(200, json={"executionStatus": "SUCCESS", "result": "ok"}),
+    ]
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        resp = responses[calls["n"]]
+        calls["n"] += 1
+        return resp
+
+    client = make_client(handler)
+    try:
+        result = await poll_until_complete(
+            client,
+            initial_response={"requestId": "r1"},
+            poll_path_template="/x/requests/{request_id}",
+            timeout_seconds=20,
+        )
+    finally:
+        await client.aclose()
+
+    assert result["status"] == "SUCCESS"
+    assert calls["n"] == 2  # initial 429 retried
+
+
 async def test_404_during_poll_is_retried(make_client):
     responses = [
         httpx.Response(404, json={"detail": "not ready"}),

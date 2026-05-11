@@ -2,6 +2,11 @@
 
 Each model becomes the JSON schema the LLM client sees. Field descriptions
 are surfaced verbatim, so they should be useful to a non-Akamai expert.
+
+Every string and list field has an explicit ``max_length`` cap. These are
+sized far above realistic Akamai inputs but bounded enough to defend
+against the "oversized payload" DoS class described in
+<https://www.akamai.com/blog/security/other-side-mcp-threat-conversation>.
 """
 
 from __future__ import annotations
@@ -22,6 +27,33 @@ SourceType = Literal["EDGE_IP", "LOCATION"]
 EstatsErrorType = Literal["EDGE_ERRORS", "ORIGIN_ERRORS"]
 EstatsDelivery = Literal["STANDARD_TLS", "ENHANCED_TLS"]
 
+# Response shape selector for case-mgmt / user-diagnostic read tools.
+# "full" preserves v0.2.0 behavior (raw Akamai response); "summary" strips
+# known-sensitive fields (case bodies, contact info, end-user IPs, ...).
+# Default is "full" in v0.2.1 to avoid breaking existing callers; v0.3.0
+# may flip the default to "summary" per Akamai MCP threat-model guidance.
+ReadFormat = Literal["full", "summary"]
+
+# --- size caps (defense against oversized-payload DoS) -----------------
+# Strings
+_MAX_HOSTNAME = 253          # RFC 1035 dotted-name limit
+_MAX_IP = 45                 # max IPv6 string length
+_MAX_ID = 128                # case/group/location IDs
+_MAX_NAME = 256              # human-readable names, severity labels
+_MAX_HEADER_LINE = 1024      # one "Name: value" entry
+_MAX_QUERY = 512             # short query strings (object status, user-agent filter)
+_MAX_TIMESTAMP = 64          # ISO 8601
+_MAX_TEXT = 8192             # comments, notes, free-form text
+_MAX_LARGE_TEXT = 32768      # case description body
+_MAX_ARL = 4096              # ARL paths can be long
+_MAX_ACCOUNT_IDS = 4096      # comma-separated id list query param
+_MAX_CURSOR = 2048           # opaque pagination cursor
+# Lists
+_MAX_HEADER_LIST = 50        # request_headers / sensitive_request_header_keys
+_MAX_EMAIL_LIST = 50         # also_notify recipients
+# Dicts (curl request_headers as name->value mapping)
+_MAX_HEADER_DICT = 50
+
 
 class _Base(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -31,12 +63,16 @@ class _Base(BaseModel):
 
 
 class UrlHealthCheckInput(_Base):
-    url: HttpUrl = Field(..., description="The full URL to health-check, e.g. https://www.example.com/path.")
+    url: HttpUrl = Field(
+        ...,
+        description="The full URL to health-check, e.g. https://www.example.com/path.",
+    )
     ip_version: IPVersion = Field(
         "IPV4", description="IP family to test against. IPV4 or IPV6."
     )
     spoof_edge_ip: str | None = Field(
         None,
+        max_length=_MAX_IP,
         description=(
             "Optional Akamai edge IP address to spoof for the request. Use list_edge_locations "
             "or verify_ip to find a valid edge IP."
@@ -48,7 +84,11 @@ class UrlHealthCheckInput(_Base):
 
 
 class DigInput(_Base):
-    hostname: str = Field(..., description="The hostname to look up, e.g. www.example.com.")
+    hostname: str = Field(
+        ...,
+        max_length=_MAX_HOSTNAME,
+        description="The hostname to look up, e.g. www.example.com.",
+    )
     query_type: DigQueryType = Field("A", description="DNS record type to query.")
     is_gtm_hostname: bool = Field(
         False,
@@ -60,6 +100,7 @@ class DigInput(_Base):
     )
     edge_location_id: str | None = Field(
         None,
+        max_length=_MAX_ID,
         description=(
             "ID of the Akamai edge location to dig from (see list_edge_locations). "
             "If omitted, Akamai picks a default."
@@ -67,6 +108,7 @@ class DigInput(_Base):
     )
     edge_ip: str | None = Field(
         None,
+        max_length=_MAX_IP,
         description=(
             "Specific edge server IP to dig from. Mutually exclusive with edge_location_id; "
             "use one or the other."
@@ -76,7 +118,9 @@ class DigInput(_Base):
 
 class MtrInput(_Base):
     destination: str = Field(
-        ..., description="The destination hostname or IP address to MTR towards."
+        ...,
+        max_length=_MAX_HOSTNAME,
+        description="The destination hostname or IP address to MTR towards.",
     )
     destination_type: DestinationType | None = Field(
         None,
@@ -105,6 +149,7 @@ class MtrInput(_Base):
     )
     source: str | None = Field(
         None,
+        max_length=_MAX_HOSTNAME,
         description=(
             "Edge IP address or location ID to run the MTR from. "
             "Pair with source_type to disambiguate."
@@ -116,6 +161,7 @@ class MtrInput(_Base):
     )
     site_shield_hostname: str | None = Field(
         None,
+        max_length=_MAX_HOSTNAME,
         description="Optional Site Shield hostname to MTR from instead of a regular edge.",
     )
 
@@ -124,17 +170,22 @@ class CurlInput(_Base):
     url: HttpUrl = Field(..., description="URL to fetch from the edge server.")
     edge_ip: str | None = Field(
         None,
+        max_length=_MAX_IP,
         description="Edge server IP to issue the request from. If omitted Akamai chooses one.",
     )
     edge_location_id: str | None = Field(
-        None, description="Edge location ID to source from. Mutually exclusive with edge_ip."
+        None,
+        max_length=_MAX_ID,
+        description="Edge location ID to source from. Mutually exclusive with edge_ip.",
     )
     spoof_edge_ip: str | None = Field(
         None,
+        max_length=_MAX_IP,
         description="Edge IP to spoof for the test (different from the source edge_ip).",
     )
     request_headers: dict[str, str] | None = Field(
         None,
+        max_length=_MAX_HEADER_DICT,
         description=(
             "Additional request headers to send, as a name->value mapping. To override "
             "User-Agent, set it here. (The previous separate user_agent param is gone.)"
@@ -142,13 +193,15 @@ class CurlInput(_Base):
     )
     sensitive_request_header_keys: list[str] | None = Field(
         None,
+        max_length=_MAX_HEADER_LIST,
         description=(
             "Header names whose values Akamai should redact from long-term storage "
             "(e.g. ['Authorization', 'Cookie'])."
         ),
     )
     run_from_site_shield: bool = Field(
-        False, description="Issue the request from a Site Shield region instead of a regular edge."
+        False,
+        description="Issue the request from a Site Shield region instead of a regular edge.",
     )
     ip_version: IPVersion = Field("IPV4", description="IP family to use.")
 
@@ -159,6 +212,7 @@ class CurlInput(_Base):
 class TranslateErrorStringInput(_Base):
     error_code: str = Field(
         ...,
+        max_length=_MAX_ID,
         description=(
             "The Akamai reference error code shown on edge error pages, "
             "e.g. '9.abc12345.1234567890.abcdef'."
@@ -185,6 +239,7 @@ class TranslateErrorStringInput(_Base):
 class GrepLogsInput(_Base):
     edge_ip: str = Field(
         ...,
+        max_length=_MAX_IP,
         description=(
             "Edge server IP to grep logs from. Required by Akamai. Use list_edge_locations "
             "or verify_ip to discover one."
@@ -195,27 +250,36 @@ class GrepLogsInput(_Base):
     )
     arl: str | None = Field(
         None,
+        max_length=_MAX_ARL,
         description="ARL (Akamai Resource Locator) to filter on, e.g. /L/123/456/.../path.",
     )
-    client_ip: str | None = Field(None, description="Client IP address to filter on.")
+    client_ip: str | None = Field(
+        None, max_length=_MAX_IP, description="Client IP address to filter on."
+    )
     object_status: str | None = Field(
-        None, description="Object status code to filter on (Akamai-specific status codes)."
+        None,
+        max_length=_MAX_QUERY,
+        description="Object status code to filter on (Akamai-specific status codes).",
     )
     http_status_code: int | None = Field(
         None, description="HTTP status code to filter on, e.g. 502."
     )
     user_agent: str | None = Field(
-        None, description="User-Agent substring to filter on."
+        None, max_length=_MAX_QUERY, description="User-Agent substring to filter on."
     )
     start: str | None = Field(
         None,
+        max_length=_MAX_TIMESTAMP,
         description="ISO 8601 start timestamp, e.g. 2026-05-02T15:00:00Z. Defaults to recent.",
     )
     end: str | None = Field(
-        None, description="ISO 8601 end timestamp. Defaults to now."
+        None,
+        max_length=_MAX_TIMESTAMP,
+        description="ISO 8601 end timestamp. Defaults to now.",
     )
     log_type: str | None = Field(
         None,
+        max_length=_MAX_QUERY,
         description="Type of log to grep (e.g. 'EDGE'). Akamai-specific; omit for the default.",
     )
 
@@ -241,16 +305,22 @@ class EstatsInput(_Base):
 
 
 class VerifyIpInput(_Base):
-    ip_address: str = Field(..., description="The IPv4 or IPv6 address to check.")
+    ip_address: str = Field(
+        ..., max_length=_MAX_IP, description="The IPv4 or IPv6 address to check."
+    )
 
 
 class LocateIpInput(_Base):
-    ip_address: str = Field(..., description="The IPv4 or IPv6 address to geolocate.")
+    ip_address: str = Field(
+        ..., max_length=_MAX_IP, description="The IPv4 or IPv6 address to geolocate."
+    )
 
 
 class VerifyAndLocateIpInput(_Base):
     ip_address: str = Field(
-        ..., description="IP address to both verify as Akamai-owned and geolocate."
+        ...,
+        max_length=_MAX_IP,
+        description="IP address to both verify as Akamai-owned and geolocate.",
     )
 
 
@@ -265,7 +335,7 @@ class ConnectivityProblemsInput(_Base):
     url: HttpUrl = Field(..., description="The URL exhibiting connectivity / latency problems.")
     ip_version: IPVersion = Field("IPV4", description="IP family to test against.")
     spoof_edge_ip: str | None = Field(
-        None, description="Edge IP to spoof during diagnosis."
+        None, max_length=_MAX_IP, description="Edge IP to spoof during diagnosis."
     )
     timeout_seconds: int = Field(
         120, ge=10, le=300, description="Maximum seconds to wait for the async result."
@@ -276,7 +346,7 @@ class ContentProblemsInput(_Base):
     url: HttpUrl = Field(..., description="The URL exhibiting incorrect or stale content.")
     ip_version: IPVersion = Field("IPV4", description="IP family to test against.")
     spoof_edge_ip: str | None = Field(
-        None, description="Edge IP to spoof during diagnosis."
+        None, max_length=_MAX_IP, description="Edge IP to spoof during diagnosis."
     )
     timeout_seconds: int = Field(
         120, ge=10, le=300, description="Maximum seconds to wait for the async result."
@@ -306,10 +376,13 @@ class CreateUserDiagnosticLinkInput(_Base):
         ),
     )
     note: str | None = Field(
-        None, description="Free-form note shown alongside the diagnostic group."
+        None,
+        max_length=_MAX_TEXT,
+        description="Free-form note shown alongside the diagnostic group.",
     )
     ipa_hostname: str | None = Field(
         None,
+        max_length=_MAX_HOSTNAME,
         description="IP Acceleration hostname, if collecting through an IPA-enabled property.",
     )
 
@@ -320,7 +393,20 @@ class ListUserDiagnosticGroupsInput(_Base):
 
 class GetUserDiagnosticDataInput(_Base):
     group_id: str = Field(
-        ..., description="The diagnostic data group ID to fetch collected records for."
+        ...,
+        max_length=_MAX_ID,
+        description="The diagnostic data group ID to fetch collected records for.",
+    )
+    format: ReadFormat = Field(
+        "full",
+        description=(
+            "Response shape. 'full' (default) returns every collected record verbatim "
+            "— including end-user IP, city-level geolocation, and ASN, all of which "
+            "are PII under most jurisdictions. 'summary' strips the IP and city, "
+            "keeping only counts, timestamps, country, and ASN. Pass 'summary' "
+            "unless you actually need per-record PII for the diagnostic. v0.3.0 "
+            "may flip this default to 'summary'."
+        ),
     )
 
 
@@ -340,10 +426,14 @@ CaseCategoryId = Literal[
 
 
 class AlternateContact(_Base):
-    name: str | None = Field(None, description="Full name of the alternate contact.")
-    email: str | None = Field(None, description="Email address.")
-    phone: str | None = Field(None, description="Phone number.")
-    company: str | None = Field(None, description="Company the contact works for.")
+    name: str | None = Field(
+        None, max_length=_MAX_NAME, description="Full name of the alternate contact."
+    )
+    email: str | None = Field(None, max_length=_MAX_NAME, description="Email address.")
+    phone: str | None = Field(None, max_length=64, description="Phone number.")
+    company: str | None = Field(
+        None, max_length=_MAX_NAME, description="Company the contact works for."
+    )
 
 
 class ListAccountCategoriesInput(_Base):
@@ -378,13 +468,26 @@ class ListCasesInput(_Base):
     )
     account_ids: str | None = Field(
         None,
+        max_length=_MAX_ACCOUNT_IDS,
         description="Comma-separated account IDs to filter by. Omit for all accessible accounts.",
     )
     limit: int | None = Field(
         None, ge=1, description="Max cases to return per page."
     )
     cursor: str | None = Field(
-        None, description="Pagination cursor from a previous response."
+        None,
+        max_length=_MAX_CURSOR,
+        description="Pagination cursor from a previous response.",
+    )
+    format: ReadFormat = Field(
+        "full",
+        description=(
+            "Response shape. 'full' (default) returns each case object verbatim. "
+            "'summary' returns just {caseId, status, severity, category, subject, "
+            "createdTime, lastUpdatedTime} per case — strips description, "
+            "alternateContact, alsoNotify, and other potentially-PII fields. "
+            "v0.3.0 may flip this default to 'summary'."
+        ),
     )
 
 
@@ -394,9 +497,14 @@ class CreateCaseInput(_Base):
         max_length=255,
         description="Title of the case (≤255 chars). Make it short and specific.",
     )
-    description: str = Field(..., description="Detailed description of the issue.")
+    description: str = Field(
+        ...,
+        max_length=_MAX_LARGE_TEXT,
+        description="Detailed description of the issue.",
+    )
     account_id: str = Field(
         ...,
+        max_length=_MAX_ID,
         description="Account to create the case under. Get from list_account_categories.",
     )
     category_id: CaseCategoryId = Field(
@@ -410,6 +518,7 @@ class CreateCaseInput(_Base):
     )
     severity: str | None = Field(
         None,
+        max_length=_MAX_NAME,
         description=(
             "Severity level. Valid values come from get_case_category for the "
             "chosen category_id — call that first if unsure."
@@ -417,41 +526,52 @@ class CreateCaseInput(_Base):
     )
     product_name: str | None = Field(
         None,
+        max_length=_MAX_NAME,
         description="Product the case is about. Valid values come from get_case_category.",
     )
     service_name: str | None = Field(
         None,
+        max_length=_MAX_NAME,
         description="Service the case is about. Valid values come from get_case_category.",
     )
     problem_name: str | None = Field(
         None,
+        max_length=_MAX_NAME,
         description="Problem name. Valid values come from get_case_category.",
     )
     area_name: str | None = Field(
         None,
+        max_length=_MAX_NAME,
         description="Area name. Required for some categories (see get_case_category).",
     )
     policy_domain_name: str | None = Field(
         None,
+        max_length=_MAX_NAME,
         description="Policy domain. Required for some categories (see get_case_category).",
     )
     product_solution_name: str | None = Field(
         None,
+        max_length=_MAX_NAME,
         description="Product solution name. Required for some categories.",
     )
     ps_package_name: str | None = Field(
         None,
+        max_length=_MAX_NAME,
         description="Professional services package name. Required for PROFESSIONAL_SERVICES.",
     )
     also_notify: list[str] | None = Field(
-        None, description="Additional email addresses to send case notifications to."
+        None,
+        max_length=_MAX_EMAIL_LIST,
+        description="Additional email addresses to send case notifications to.",
     )
     alternate_contact: AlternateContact | None = Field(
         None,
         description="Alternate person for the support team to contact (name/email/phone/company).",
     )
     customer_tracking_number: str | None = Field(
-        None, description="Your internal ticket / tracking number for cross-reference."
+        None,
+        max_length=_MAX_NAME,
+        description="Your internal ticket / tracking number for cross-reference.",
     )
     partner_ticket_number: str | None = Field(
         None,
@@ -460,18 +580,31 @@ class CreateCaseInput(_Base):
     )
     parent_account_id: str | None = Field(
         None,
+        max_length=_MAX_ID,
         description="Parent account to associate the case with, if relevant.",
     )
 
 
 class GetCaseInput(_Base):
-    case_id: str = Field(..., description="The case ID to fetch.")
+    case_id: str = Field(..., max_length=_MAX_ID, description="The case ID to fetch.")
+    format: ReadFormat = Field(
+        "full",
+        description=(
+            "Response shape. 'full' (default) returns the entire case object "
+            "verbatim, including description, contact emails / phone, and "
+            "customer-tracking numbers. 'summary' returns just {caseId, status, "
+            "severity, category, subject, createdTime, lastUpdatedTime, "
+            "commentCount}. Pass 'summary' for privacy-sensitive contexts."
+        ),
+    )
 
 
 class UpdateCaseInput(_Base):
-    case_id: str = Field(..., description="The case ID to update.")
+    case_id: str = Field(..., max_length=_MAX_ID, description="The case ID to update.")
     also_notify: list[str] | None = Field(
-        None, description="Updated list of email addresses for case notifications."
+        None,
+        max_length=_MAX_EMAIL_LIST,
+        description="Updated list of email addresses for case notifications.",
     )
     alternate_contact: AlternateContact | None = Field(
         None, description="Updated alternate contact details."
@@ -479,18 +612,34 @@ class UpdateCaseInput(_Base):
 
 
 class ListCaseCommentsInput(_Base):
-    case_id: str = Field(..., description="The case ID to list comments for.")
+    case_id: str = Field(
+        ..., max_length=_MAX_ID, description="The case ID to list comments for."
+    )
+    format: ReadFormat = Field(
+        "full",
+        description=(
+            "Response shape. 'full' (default) returns every comment with its full "
+            "body. 'summary' returns just {commentId, createdTime, author} per "
+            "comment — useful when you only need a count and recency, not the "
+            "discussion content."
+        ),
+    )
 
 
 class AddCaseCommentInput(_Base):
-    case_id: str = Field(..., description="The case ID to comment on.")
-    comment: str = Field(..., description="Comment text to add.")
+    case_id: str = Field(..., max_length=_MAX_ID, description="The case ID to comment on.")
+    comment: str = Field(
+        ..., max_length=_MAX_TEXT, description="Comment text to add."
+    )
 
 
 class RequestCaseClosureInput(_Base):
-    case_id: str = Field(..., description="The case ID to request closure for.")
+    case_id: str = Field(
+        ..., max_length=_MAX_ID, description="The case ID to request closure for."
+    )
     comment: str | None = Field(
         None,
+        max_length=_MAX_TEXT,
         description="Optional context for closing (e.g. resolution summary).",
     )
 
@@ -508,6 +657,7 @@ class MetadataTraceInput(_Base):
     )
     edge_ip: str | None = Field(
         None,
+        max_length=_MAX_IP,
         description=(
             "Edge server IP to source the trace from. Mutually exclusive with "
             "mdt_location_id; provide one or the other."
@@ -515,6 +665,7 @@ class MetadataTraceInput(_Base):
     )
     mdt_location_id: str | None = Field(
         None,
+        max_length=_MAX_ID,
         description=(
             "MDT-specific edge location ID (see list_mdt_locations). Mutually "
             "exclusive with edge_ip."
@@ -530,6 +681,7 @@ class MetadataTraceInput(_Base):
     )
     request_headers: list[str] | None = Field(
         None,
+        max_length=_MAX_HEADER_LIST,
         description=(
             "Custom request headers as a list of 'Header-Name: value' strings, "
             "e.g. ['X-Foo: bar', 'Accept-Language: en']."
@@ -537,6 +689,7 @@ class MetadataTraceInput(_Base):
     )
     sensitive_request_header_keys: list[str] | None = Field(
         None,
+        max_length=_MAX_HEADER_LIST,
         description=(
             "Header names to mark sensitive so Akamai excludes their values from "
             "long-term storage."

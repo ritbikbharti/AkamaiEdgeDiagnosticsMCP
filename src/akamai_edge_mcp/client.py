@@ -58,14 +58,42 @@ def _redact_body(value: Any) -> Any:
 
 
 class AkamaiAPIError(RuntimeError):
-    """Raised when the Akamai API returns a non-2xx response."""
+    """Raised when the Akamai API returns a non-2xx response.
 
-    def __init__(self, status_code: int, body: Any, *, method: str, url: str):
+    ``retry_after_seconds`` is populated on 429 / 503 responses when the
+    server included a ``Retry-After`` header. The polling helper honors
+    this automatically; for one-shot calls, the LLM-facing error envelope
+    surfaces it so the caller can decide to wait.
+    """
+
+    def __init__(
+        self,
+        status_code: int,
+        body: Any,
+        *,
+        method: str,
+        url: str,
+        retry_after_seconds: float | None = None,
+    ):
         self.status_code = status_code
         self.body = body
         self.method = method
         self.url = url
+        self.retry_after_seconds = retry_after_seconds
         super().__init__(f"Akamai API {method} {url} returned {status_code}: {body!r}")
+
+
+def _parse_retry_after(value: str | None) -> float | None:
+    """Parse a Retry-After header. Akamai sends seconds; spec also
+    allows HTTP-date but we don't see that in practice. Returns None
+    on absence / malformation."""
+    if not value:
+        return None
+    try:
+        n = float(value.strip())
+        return n if n > 0 else None
+    except (TypeError, ValueError):
+        return None
 
 
 class _EdgeGridHttpxAuth(httpx.Auth):
@@ -198,8 +226,13 @@ class AkamaiEdgeDiagnosticsClient:
                 body: Any = response.json()
             except ValueError:
                 body = response.text
+            retry_after = _parse_retry_after(response.headers.get("retry-after"))
             raise AkamaiAPIError(
-                response.status_code, _redact_body(body), method=method, url=url
+                response.status_code,
+                _redact_body(body),
+                method=method,
+                url=url,
+                retry_after_seconds=retry_after,
             )
         if response.status_code == 204 or not response.content:
             return None

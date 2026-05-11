@@ -75,14 +75,59 @@ async def list_user_diagnostic_groups(
     return await client.get("/user-diagnostic-data/groups")
 
 
+_UDD_PII_FIELDS: frozenset[str] = frozenset(
+    {
+        "ip",
+        "ipAddress",
+        "internalIp",
+        "externalIp",
+        "clientIp",
+        "userAgent",
+        "city",
+        "postalCode",
+        "latitude",
+        "longitude",
+    }
+)
+
+
+def _summarize_udd_record(record: Any) -> Any:
+    """Strip per-record PII (IP, city, lat/long, UA) for format='summary'."""
+    if isinstance(record, dict):
+        return {k: v for k, v in record.items() if k not in _UDD_PII_FIELDS}
+    return record
+
+
+def _apply_udd_summary(payload: Any) -> Any:
+    if isinstance(payload, dict) and isinstance(payload.get("records"), list):
+        return {
+            **{k: v for k, v in payload.items() if k != "records"},
+            "records": [_summarize_udd_record(r) for r in payload["records"]],
+            "recordCount": len(payload["records"]),
+        }
+    if isinstance(payload, list):
+        return {
+            "records": [_summarize_udd_record(r) for r in payload],
+            "recordCount": len(payload),
+        }
+    return payload
+
+
 async def get_user_diagnostic_data(
     client: AkamaiEdgeDiagnosticsClient, params: GetUserDiagnosticDataInput
 ) -> dict[str, Any]:
     """Fetch the records collected by a user-diagnostic-data group.
 
-    Each record represents one end-user visit and includes their IP,
-    geolocation, ASN, and connection details.
+    Each record represents one end-user visit. ``format='full'`` (default
+    for back-compat) returns IP, city-level geolocation, and ASN —
+    PII under most jurisdictions. ``format='summary'`` strips IP,
+    city, postal code, lat/long, and User-Agent, keeping only counts,
+    timestamps, country, and ASN. Use 'summary' unless you actually need
+    per-record PII for the diagnostic.
     """
-    return await client.get(
+    response = await client.get(
         f"/user-diagnostic-data/groups/{params.group_id}/records"
     )
+    if params.format == "summary":
+        return _apply_udd_summary(response)
+    return response

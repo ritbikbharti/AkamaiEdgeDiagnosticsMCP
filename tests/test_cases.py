@@ -239,6 +239,148 @@ async def test_get_case_category_path(make_client):
     assert seen["path"] == "/case-management/v3/categories/TECHNICAL"
 
 
+async def test_get_case_full_format_returns_response_verbatim(make_client):
+    """format='full' (default) preserves v0.2.0 behavior."""
+    rich_response = {
+        "caseId": "00789",
+        "subject": "Edge 502 spike",
+        "description": "Origin is returning 502 for /api/* since 17:33 UTC",
+        "severity": "2-Significant",
+        "status": "OPEN",
+        "createdTime": "2026-05-06T17:35:00Z",
+        "alternateContact": {"email": "ops@example.com", "phone": "+1-555-0100"},
+        "alsoNotify": ["sre@example.com", "oncall@example.com"],
+        "customerTrackingNumber": "INC-99999",
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=rich_response)
+
+    client = make_client(handler)
+    try:
+        full = await cases.get_case(client, M.GetCaseInput(case_id="00789"))
+    finally:
+        await client.aclose()
+
+    assert full == rich_response
+
+
+async def test_get_case_summary_format_strips_pii_and_body(make_client):
+    """format='summary' strips description / contact / notify / tracking."""
+    rich_response = {
+        "caseId": "00789",
+        "subject": "Edge 502 spike",
+        "description": "Origin is returning 502 for /api/* since 17:33 UTC",
+        "severity": "2-Significant",
+        "status": "OPEN",
+        "createdTime": "2026-05-06T17:35:00Z",
+        "alternateContact": {"email": "ops@example.com", "phone": "+1-555-0100"},
+        "alsoNotify": ["sre@example.com"],
+        "customerTrackingNumber": "INC-99999",
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=rich_response)
+
+    client = make_client(handler)
+    try:
+        summary = await cases.get_case(
+            client, M.GetCaseInput(case_id="00789", format="summary")
+        )
+    finally:
+        await client.aclose()
+
+    # Identifying / status fields preserved
+    assert summary["caseId"] == "00789"
+    assert summary["subject"] == "Edge 502 spike"
+    assert summary["severity"] == "2-Significant"
+    assert summary["status"] == "OPEN"
+    # Sensitive fields stripped (not redacted — entirely absent)
+    assert "description" not in summary
+    assert "alternateContact" not in summary
+    assert "alsoNotify" not in summary
+    assert "customerTrackingNumber" not in summary
+
+
+async def test_list_cases_summary_strips_per_case_pii(make_client):
+    api_response = {
+        "cases": [
+            {
+                "caseId": "001",
+                "subject": "First",
+                "status": "OPEN",
+                "description": "secret one",
+                "alsoNotify": ["a@b.com"],
+            },
+            {
+                "caseId": "002",
+                "subject": "Second",
+                "status": "CLOSED",
+                "description": "secret two",
+                "alternateContact": {"email": "c@d.com"},
+            },
+        ],
+        "cursor": "next-page",
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=api_response)
+
+    client = make_client(handler)
+    try:
+        out = await cases.list_cases(
+            client, M.ListCasesInput(type="MY_ACTIVE_CASES", format="summary")
+        )
+    finally:
+        await client.aclose()
+
+    assert out["cursor"] == "next-page"  # pagination preserved
+    assert len(out["cases"]) == 2
+    for c in out["cases"]:
+        assert "description" not in c
+        assert "alsoNotify" not in c
+        assert "alternateContact" not in c
+    assert out["cases"][0]["caseId"] == "001"
+    assert out["cases"][1]["status"] == "CLOSED"
+
+
+async def test_list_case_comments_summary_drops_bodies(make_client):
+    api_response = {
+        "comments": [
+            {
+                "commentId": "c1",
+                "createdTime": "2026-05-06T18:00:00Z",
+                "author": "rbharti",
+                "body": "I reproduced the issue at 17:55 UTC.",
+            },
+            {
+                "commentId": "c2",
+                "createdTime": "2026-05-06T18:30:00Z",
+                "author": "akamai-support",
+                "body": "Looking into it.",
+            },
+        ]
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=api_response)
+
+    client = make_client(handler)
+    try:
+        out = await cases.list_case_comments(
+            client, M.ListCaseCommentsInput(case_id="00789", format="summary")
+        )
+    finally:
+        await client.aclose()
+
+    assert out["commentCount"] == 2
+    for c in out["comments"]:
+        assert "body" not in c
+        assert "commentId" in c
+        assert "createdTime" in c
+        assert "author" in c
+
+
 async def test_list_account_categories_path(make_client):
     seen = {}
 

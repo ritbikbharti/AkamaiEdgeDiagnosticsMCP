@@ -179,6 +179,65 @@ async def test_account_switch_key_added_as_query_param(credentials):
     assert seen["query"]["accountSwitchKey"] == "B-X-1234:5-6789"
 
 
+async def test_429_response_populates_retry_after_seconds(make_client):
+    """SECURITY (cost / quota exhaustion defense): 429 with Retry-After header
+    must surface the wait time on AkamaiAPIError so callers can back off."""
+    from akamai_edge_mcp.client import AkamaiAPIError
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            429,
+            json={"detail": "rate limited"},
+            headers={"Retry-After": "12"},
+        )
+
+    client = make_client(handler)
+    try:
+        with pytest.raises(AkamaiAPIError) as info:
+            await client.get("/dig")
+    finally:
+        await client.aclose()
+
+    assert info.value.status_code == 429
+    assert info.value.retry_after_seconds == 12.0
+
+
+async def test_429_without_retry_after_header_yields_none(make_client):
+    from akamai_edge_mcp.client import AkamaiAPIError
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, json={})
+
+    client = make_client(handler)
+    try:
+        with pytest.raises(AkamaiAPIError) as info:
+            await client.get("/dig")
+    finally:
+        await client.aclose()
+
+    assert info.value.retry_after_seconds is None
+
+
+async def test_malformed_retry_after_header_yields_none(make_client):
+    """Don't crash on a non-numeric Retry-After (HTTP-date form is allowed
+    by spec but not what Akamai sends; treat as 'unknown'). """
+    from akamai_edge_mcp.client import AkamaiAPIError
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            429, json={}, headers={"Retry-After": "Wed, 06 May 2026 12:00:00 GMT"}
+        )
+
+    client = make_client(handler)
+    try:
+        with pytest.raises(AkamaiAPIError) as info:
+            await client.get("/dig")
+    finally:
+        await client.aclose()
+
+    assert info.value.retry_after_seconds is None
+
+
 async def test_account_switch_key_is_redacted_in_debug_log(caplog, credentials):
     """Regression: accountSwitchKey must NOT appear in DEBUG log output."""
     import logging

@@ -73,13 +73,19 @@ def _make_handler(
             params = model(**kwargs)
             return await impl(client, params)
         except AkamaiAPIError as exc:
-            return {
+            envelope = {
                 "error": "akamai_api_error",
                 "status_code": exc.status_code,
                 "method": exc.method,
                 "url": exc.url,
                 "body": exc.body,
             }
+            # Surface Retry-After so the LLM can choose to wait instead of
+            # immediately retrying (which would make rate-limit hangovers
+            # worse). Akamai sets this on 429 / sometimes 503.
+            if exc.retry_after_seconds is not None:
+                envelope["retry_after_seconds"] = exc.retry_after_seconds
+            return envelope
         except PollingTimeoutError as exc:
             return {
                 "error": "polling_timeout",
