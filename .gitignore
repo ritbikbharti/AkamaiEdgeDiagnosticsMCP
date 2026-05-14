@@ -27,3 +27,7 @@ secrets.toml
 .cursor/
 .idea/
 .vscode/
+
+# Local working-context docs — do NOT commit (public repo)
+CLAUDE.md
+HANDOFF.md
